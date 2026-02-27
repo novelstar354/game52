@@ -162,6 +162,11 @@ function draw(){
       // 移動可能マス
       if(moves.some(m=>m.x===x && m.y===y))
         cell.classList.add("move");
+        if(dropPiece){
+  if(!board[y][x] && isLegalDrop(dropPiece.t,x,y)){
+    cell.classList.add("move");
+  }
+}
 
       // 🔥 ネオンリングカーソル
       if(cursor && cursor.x===x && cursor.y===y){
