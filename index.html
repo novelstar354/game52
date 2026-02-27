@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NEON SHOGI ENGINE</title>
+
+<style>
+:root{ --neon:#00f7ff; }
+
+body{
+  margin:0;
+  background:#050510;
+  color:white;
+  font-family:sans-serif;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+h1{
+  color:var(--neon);
+  text-shadow:0 0 15px var(--neon);
+}
+
+#board{
+  display:grid;
+  grid-template-columns:repeat(9,1fr);
+  width:min(92vw,540px);
+  aspect-ratio:1/1;
+  border:3px solid var(--neon);
+  box-shadow:0 0 30px var(--neon);
+}
+
+.cell{
+  border:1px solid rgba(0,255,255,0.25);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:clamp(18px,4vw,28px);
+  cursor:pointer;
+  position:relative;
+  transition:0.15s;
+}
+
+.selected{ background:rgba(255,255,0,0.3); }
+.move{ background:rgba(0,255,0,0.25); }
+
+.piece{
+  transition:transform 0.25s, opacity 0.25s;
+  text-shadow:0 0 10px var(--neon);
+}
+
+.promote{
+  animation:promoteFlash 0.5s ease;
+}
+
+@keyframes promoteFlash{
+  0%{ transform:scale(1); filter:brightness(1); }
+  50%{ transform:scale(1.4); filter:brightness(3); }
+  100%{ transform:scale(1); filter:brightness(1); }
+}
+
+.white{ transform:rotate(180deg); }
+
+#status{
+  margin:10px;
+  color:var(--neon);
+  font-weight:bold;
+}
+/* ===== ネオンカーソル ===== */
+.cursor{
+  position:absolute;
+  inset:2px;
+  border:2px solid var(--neon);
+  border-radius:6px;
+  pointer-events:none;
+  box-shadow:
+    0 0 6px var(--neon),
+    0 0 12px var(--neon),
+    inset 0 0 8px var(--neon);
+  animation:cursorPulse 1.2s infinite ease-in-out;
+}
+
+@keyframes cursorPulse{
+  0%{ opacity:0.7; transform:scale(1); }
+  50%{ opacity:1; transform:scale(1.05); }
+  100%{ opacity:0.7; transform:scale(1); }
+}
+</style>
+</head>
+<body>
+
+<h1>NEON 将棋 ENGINE</h1>
+<div id="status"></div>
+<div id="board"></div>
+
+<script>
+const boardEl=document.getElementById("board");
+const statusEl=document.getElementById("status");
+
+const P={
+K:"王",R:"飛",B:"角",G:"金",S:"銀",
+N:"桂",L:"香",P:"歩",
+"+R":"竜","+B":"馬","+S":"全","+N":"圭","+L":"杏","+P":"と"
+};
+
+let board,turn="b",selected=null,moves=[];
+let cursor = { x:4, y:4 };
+
+function init(){
+  board=Array(9).fill().map(()=>Array(9).fill(null));
+  const back=["L","N","S","G","K","G","S","N","L"];
+  for(let i=0;i<9;i++){
+    board[0][i]={t:back[i],c:"w"};
+    board[8][i]={t:back[i],c:"b"};
+    board[2][i]={t:"P",c:"w"};
+    board[6][i]={t:"P",c:"b"};
+  }
+  board[1][1]={t:"B",c:"w"};
+  board[1][7]={t:"R",c:"w"};
+  board[7][1]={t:"R",c:"b"};
+  board[7][7]={t:"B",c:"b"};
+}
+
+function clone(b){ return JSON.parse(JSON.stringify(b)); }
+
+function draw(){
+  boardEl.innerHTML="";
+
+  for(let y=0;y<9;y++){
+    for(let x=0;x<9;x++){
+
+      const cell=document.createElement("div");
+      cell.className="cell";
+      cell.onclick=()=>click(x,y);
+
+      // 選択マス
+      if(selected && selected.x===x && selected.y===y){
+        cell.classList.add("selected");
+      }
+
+      // 合法手表示
+      if(moves.some(m=>m.x===x && m.y===y)){
+        cell.classList.add("move");
+      }
+
+      // ネオンカーソル
+      if(cursor && cursor.x===x && cursor.y===y){
+        const ring=document.createElement("div");
+        ring.className="cursor";
+        cell.appendChild(ring);
+      }
+
+      // 駒描画
+      const p=board[y][x];
+      if(p){
+        const span=document.createElement("div");
+        span.className="piece "+(p.c==="w"?"white":"");
+        span.textContent=P[p.t];
+        cell.appendChild(span);
+      }
+
+      boardEl.appendChild(cell);
+    }
+  }
+
+  updateStatus();
+}
+
+function click(x,y){
+  const p=board[y][x];
+  if(selected){
+    if(moves.some(m=>m.x===x&&m.y===y)){
+      move(selected.x,selected.y,x,y);
+      selected=null;
+      moves=[];
+      turn=turn==="b"?"w":"b";
+      draw();
+      return;
+    }
+  }
+
+  if(p && p.c===turn){
+    selected={x,y};
+    moves=getLegalMoves(x,y);
+  }else{
+    selected=null;
+    moves=[];
+  }
+  draw();
+}
+
+function move(x1,y1,x2,y2){
+  const p=board[y1][x1];
+  board[y2][x2]=p;
+  board[y1][x1]=null;
+
+  // 成り
+  if((p.c==="b"&&y2<=2)||(p.c==="w"&&y2>=6)){
+    if(["P","L","N","S","B","R"].includes(p.t)&&!p.t.startsWith("+")){
+      p.t="+"+p.t;
+      setTimeout(()=>draw(),10);
+    }
+  }
+}
+
+function getMovesRaw(b,x,y){
+  const p=b[y][x];
+  const dir=p.c==="b"?-1:1;
+  const list=[];
+  const add=(dx,dy,repeat=false)=>{
+    let nx=x+dx,ny=y+dy;
+    while(nx>=0&&nx<9&&ny>=0&&ny<9){
+      if(b[ny][nx]){
+        if(b[ny][nx].c!==p.c)
+          list.push({x:nx,y:ny});
+        break;
+      }
+      list.push({x:nx,y:ny});
+      if(!repeat)break;
+      nx+=dx;ny+=dy;
+    }
+  };
+
+  if(p.t==="P") add(0,dir);
+  if(p.t==="R") {add(1,0,true);add(-1,0,true);add(0,1,true);add(0,-1,true);}
+  if(p.t==="B") {add(1,1,true);add(-1,1,true);add(1,-1,true);add(-1,-1,true);}
+  if(p.t==="K"){
+    for(let dx=-1;dx<=1;dx++)
+      for(let dy=-1;dy<=1;dy++)
+        if(dx||dy)add(dx,dy);
+  }
+  if(p.t==="G"||p.t==="+P")
+    {add(0,dir);add(-1,dir);add(1,dir);add(-1,0);add(1,0);add(0,-dir);}
+
+  return list;
+}
+
+function getLegalMoves(x,y){
+  const raw=getMovesRaw(board,x,y);
+  return raw.filter(m=>{
+    const test=clone(board);
+    test[m.y][m.x]=test[y][x];
+    test[y][x]=null;
+    return !isCheck(test,turn);
+  });
+}
+
+function isCheck(b,color){
+  let king;
+  for(let y=0;y<9;y++)
+    for(let x=0;x<9;x++)
+      if(b[y][x]&&b[y][x].t==="K"&&b[y][x].c===color)
+        king={x,y};
+
+  for(let y=0;y<9;y++)
+    for(let x=0;x<9;x++)
+      if(b[y][x]&&b[y][x].c!==color){
+        const moves=getMovesRaw(b,x,y);
+        if(moves.some(m=>m.x===king.x&&m.y===king.y))
+          return true;
+      }
+  return false;
+}
+
+function isMate(color){
+  if(!isCheck(board,color)) return false;
+  for(let y=0;y<9;y++)
+    for(let x=0;x<9;x++)
+      if(board[y][x]&&board[y][x].c===color)
+        if(getLegalMoves(x,y).length>0)
+          return false;
+  return true;
+}
+
+function updateStatus(){
+  let txt=(turn==="b"?"先手":"後手")+"の番";
+  if(isCheck(board,turn)) txt+="（王手）";
+  if(isMate(turn)) txt="詰み！";
+  statusEl.textContent=txt;
+}
+
+init();
+draw();
+
+
+document.addEventListener("keydown", e=>{
+  if(e.key==="ArrowUp") cursor.y=Math.max(0,cursor.y-1);
+  if(e.key==="ArrowDown") cursor.y=Math.min(8,cursor.y+1);
+  if(e.key==="ArrowLeft") cursor.x=Math.max(0,cursor.x-1);
+  if(e.key==="ArrowRight") cursor.x=Math.min(8,cursor.x+1);
+
+  if(e.key==="Escape"){
+    selected=null;
+    moves=[];
+  }
+
+  if(e.key==="Enter"){
+    click(cursor.x,cursor.y);
+  }
+
+  draw();
+});
+</script>
+</body>
+</html>
