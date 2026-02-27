@@ -120,7 +120,10 @@ let board,turn="b",selected=null,moves=[];
 let cursor = {x:4,y:4};
 let hands={b:{},w:{}};
 let dropPiece=null;
-
+let handMode=false;
+let handList=[];
+let handIndex=0;
+    
 function init(){
   board=Array(9).fill().map(()=>Array(9).fill(null));
   const back=["L","N","S","G","K","G","S","N","L"];
@@ -185,13 +188,26 @@ function draw(){
 }
 
 function drawHands(){
-  ["b","w"].forEach(color=>{
-    const el=document.getElementById(color==="b"?"blackHand":"whiteHand");
+  ["w","b"].forEach(color=>{
+
+    const el=document.getElementById(
+      color==="b" ? "blackHand" : "whiteHand"
+    );
+
     el.innerHTML="";
 
-    for(let t in hands[color]){
+    const entries=Object.entries(hands[color]);
+
+    if(entries.length===0){
+      el.textContent="";
+      return;
+    }
+
+    entries.forEach(([t,count])=>{
+      if(count<=0) return;
+
       const span=document.createElement("span");
-      span.textContent=P[t]+"×"+hands[color][t];
+      span.textContent=P[t]+"×"+count;
 
       if(color===turn){
         span.onclick=()=>{
@@ -200,7 +216,8 @@ function drawHands(){
       }
 
       el.appendChild(span);
-    }
+    });
+
   });
 }
 
@@ -363,8 +380,17 @@ function isMateAfterDrop(testBoard,color){
 
 function updateStatus(){
   let txt=(turn==="b"?"先手":"後手")+"の番";
+
+  if(handMode){
+    txt+="【持ち駒選択中】";
+    if(handList.length>0){
+      txt+="："+P[handList[handIndex]];
+    }
+  }
+
   if(isCheck(board,turn)) txt+="（王手）";
   if(isMate(turn)) txt="詰み！";
+
   statusEl.textContent=txt;
 }
 
@@ -443,9 +469,7 @@ draw();
 /* ====== キーボード操作 ====== */
 
 
-let handMode=false;
-let handList=[];
-let handIndex=0;
+
 
 
 function updateHandList(){
@@ -455,45 +479,65 @@ function updateHandList(){
 
 document.addEventListener("keydown",e=>{
 
-  if(e.key==="ArrowUp") cursor.y=Math.max(0,cursor.y-1);
-  if(e.key==="ArrowDown") cursor.y=Math.min(8,cursor.y+1);
-  if(e.key==="ArrowLeft") cursor.x=Math.max(0,cursor.x-1);
-  if(e.key==="ArrowRight") cursor.x=Math.min(8,cursor.x+1);
+  // リセット
+  if(e.key==="r"||e.key==="R"){
+    init();
+    turn="b";
+    draw();
+    return;
+  }
 
+  // キャンセル
   if(e.key==="Escape"){
     selected=null;
     moves=[];
     dropPiece=null;
     handMode=false;
+    draw();
+    return;
   }
 
-  if(e.key==="r"||e.key==="R"){
-    init();
-    turn="b";
-  }
-
-  // 持ち駒モード
+  // Dで持ち駒モード切替
   if(e.key==="d"||e.key==="D"){
     handMode=!handMode;
     updateHandList();
+    draw();
+    return;
   }
 
-  // 持ち駒選択
-  if(handMode && handList.length>0){
-    if(e.key==="ArrowLeft") handIndex=(handIndex-1+handList.length)%handList.length;
-    if(e.key==="ArrowRight") handIndex=(handIndex+1)%handList.length;
+  // ===== 持ち駒モード中 =====
+  if(handMode){
+
+    if(handList.length===0) return;
+
+    if(e.key==="ArrowLeft"){
+      handIndex=(handIndex-1+handList.length)%handList.length;
+    }
+
+    if(e.key==="ArrowRight"){
+      handIndex=(handIndex+1)%handList.length;
+    }
+
     if(e.key==="Enter"||e.key===" "){
       dropPiece={t:handList[handIndex]};
       handMode=false;
     }
-  }else{
-    if(e.key==="Enter"||e.key===" "){
-      click(cursor.x,cursor.y);
-    }
+
+    draw();
+    return;
+  }
+
+  // ===== 通常カーソル移動 =====
+  if(e.key==="ArrowUp") cursor.y=Math.max(0,cursor.y-1);
+  if(e.key==="ArrowDown") cursor.y=Math.min(8,cursor.y+1);
+  if(e.key==="ArrowLeft") cursor.x=Math.max(0,cursor.x-1);
+  if(e.key==="ArrowRight") cursor.x=Math.min(8,cursor.x+1);
+
+  if(e.key==="Enter"||e.key===" "){
+    click(cursor.x,cursor.y);
   }
 
   draw();
-  drawCursor();
 });
 
 
