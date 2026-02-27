@@ -2,9 +2,10 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NEON SHOGI ENGINE</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>NEON SHOGI</title>
 <link rel="icon" href="https://www.silhouette-illust.com/wp-content/uploads/2016/09/shougi_oushou_9277-600x600.jpg" sizes="16×16" type="image/png" /> 
+
 <style>
 :root{ --neon:#00f7ff; }
 
@@ -23,13 +24,19 @@ h1{
   text-shadow:0 0 15px var(--neon);
 }
 
+#status{
+  margin:8px;
+  color:var(--neon);
+  font-weight:bold;
+}
+
 #board{
   display:grid;
   grid-template-columns:repeat(9,1fr);
-  width:min(92vw,540px);
+  width:min(95vw,520px);
   aspect-ratio:1/1;
   border:3px solid var(--neon);
-  box-shadow:0 0 30px var(--neon);
+  box-shadow:0 0 25px var(--neon);
 }
 
 .cell{
@@ -38,54 +45,56 @@ h1{
   align-items:center;
   justify-content:center;
   font-size:clamp(18px,4vw,28px);
-  cursor:pointer;
-  position:relative;
-  transition:0.15s;
+  user-select:none;
 }
 
 .selected{ background:rgba(255,255,0,0.3); }
 .move{ background:rgba(0,255,0,0.25); }
 
-.piece{
-  transition:transform 0.25s, opacity 0.25s;
-  text-shadow:0 0 10px var(--neon);
-}
-
-.promote{
-  animation:promoteFlash 0.5s ease;
-}
-
-@keyframes promoteFlash{
-  0%{ transform:scale(1); filter:brightness(1); }
-  50%{ transform:scale(1.4); filter:brightness(3); }
-  100%{ transform:scale(1); filter:brightness(1); }
-}
-
+.piece{ text-shadow:0 0 8px var(--neon); }
 .white{ transform:rotate(180deg); }
 
-#status{
-  margin:10px;
-  color:var(--neon);
-  font-weight:bold;
-}
-/* ===== ネオンカーソル ===== */
-.cursor{
-  position:absolute;
-  inset:2px;
-  border:2px solid var(--neon);
-  border-radius:6px;
-  pointer-events:none;
-  box-shadow:
-    0 0 6px var(--neon),
-    0 0 12px var(--neon),
-    inset 0 0 8px var(--neon);
-  animation:cursorPulse 1.2s infinite ease-in-out;
+.hand{
+  display:flex;
+  gap:6px;
+  margin:6px;
+  flex-wrap:wrap;
+  justify-content:center;
 }
 
-@keyframes cursorPulse{
+.hand span{
+  border:1px solid var(--neon);
+  padding:4px 6px;
+  border-radius:6px;
+  cursor:pointer;
+}
+.cursorRing{
+  position:absolute;
+  inset:4px;
+  border:2px solid #00f7ff;
+  border-radius:8px;
+  pointer-events:none;
+  box-shadow:
+    0 0 6px #00f7ff,
+    0 0 12px #00f7ff,
+    inset 0 0 8px #00f7ff;
+  animation:neonPulse 1.2s infinite ease-in-out;
+    backdrop-filter: blur(2px);
+}
+
+@keyframes neonPulse{
   0%{ opacity:0.7; transform:scale(1); }
   50%{ opacity:1; transform:scale(1.05); }
   100%{ opacity:0.7; transform:scale(1); }
+}
+.cell{
+  position:relative;   /* ← これ追加 */
+  border:1px solid rgba(0,255,255,0.25);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:clamp(18px,4vw,28px);
+  user-select:none;
 }
 </style>
 </head>
@@ -93,7 +102,9 @@ h1{
 
 <h1>NEON 将棋 ENGINE</h1>
 <div id="status"></div>
+<div id="whiteHand" class="hand"></div>
 <div id="board"></div>
+<div id="blackHand" class="hand"></div>
 
 <script>
 const boardEl=document.getElementById("board");
@@ -106,21 +117,27 @@ N:"桂",L:"香",P:"歩",
 };
 
 let board,turn="b",selected=null,moves=[];
-let cursor = { x:4, y:4 };
+let cursor = {x:4,y:4};
+let hands={b:{},w:{}};
+let dropPiece=null;
 
 function init(){
   board=Array(9).fill().map(()=>Array(9).fill(null));
   const back=["L","N","S","G","K","G","S","N","L"];
+
   for(let i=0;i<9;i++){
     board[0][i]={t:back[i],c:"w"};
     board[8][i]={t:back[i],c:"b"};
     board[2][i]={t:"P",c:"w"};
     board[6][i]={t:"P",c:"b"};
   }
+
   board[1][1]={t:"B",c:"w"};
   board[1][7]={t:"R",c:"w"};
   board[7][1]={t:"R",c:"b"};
   board[7][7]={t:"B",c:"b"};
+
+  hands={b:{},w:{}};
 }
 
 function clone(b){ return JSON.parse(JSON.stringify(b)); }
@@ -136,19 +153,17 @@ function draw(){
       cell.onclick=()=>click(x,y);
 
       // 選択マス
-      if(selected && selected.x===x && selected.y===y){
+      if(selected && selected.x===x && selected.y===y)
         cell.classList.add("selected");
-      }
 
-      // 合法手表示
-      if(moves.some(m=>m.x===x && m.y===y)){
+      // 移動可能マス
+      if(moves.some(m=>m.x===x && m.y===y))
         cell.classList.add("move");
-      }
 
-      // ネオンカーソル
+      // 🔥 ネオンリングカーソル
       if(cursor && cursor.x===x && cursor.y===y){
         const ring=document.createElement("div");
-        ring.className="cursor";
+        ring.className="cursorRing";
         cell.appendChild(ring);
       }
 
@@ -156,7 +171,7 @@ function draw(){
       const p=board[y][x];
       if(p){
         const span=document.createElement("div");
-        span.className="piece "+(p.c==="w"?"white":"");
+        span.className="piece " + (p.c==="w" ? "white" : "");
         span.textContent=P[p.t];
         cell.appendChild(span);
       }
@@ -165,11 +180,56 @@ function draw(){
     }
   }
 
+  drawHands();
   updateStatus();
 }
 
+function drawHands(){
+  ["b","w"].forEach(color=>{
+    const el=document.getElementById(color==="b"?"blackHand":"whiteHand");
+    el.innerHTML="";
+
+    for(let t in hands[color]){
+      const span=document.createElement("span");
+      span.textContent=P[t]+"×"+hands[color][t];
+
+      if(color===turn){
+        span.onclick=()=>{
+          dropPiece={t};
+        };
+      }
+
+      el.appendChild(span);
+    }
+  });
+}
+
 function click(x,y){
+
+ if(dropPiece){
+  if(board[y][x]) return;
+  if(!isLegalDrop(dropPiece.t,x,y)) return;
+
+  const test=clone(board);
+  test[y][x]={t:dropPiece.t,c:turn};
+
+  if(dropPiece.t==="P" && isMateAfterDrop(test,turn))
+    return;
+
+  board[y][x]={t:dropPiece.t,c:turn};
+
+  hands[turn][dropPiece.t]--;
+  if(hands[turn][dropPiece.t]===0)
+    delete hands[turn][dropPiece.t];
+
+  dropPiece=null;
+  turn=turn==="b"?"w":"b";
+  draw();
+  return;
+}
+
   const p=board[y][x];
+
   if(selected){
     if(moves.some(m=>m.x===x&&m.y===y)){
       move(selected.x,selected.y,x,y);
@@ -181,71 +241,72 @@ function click(x,y){
     }
   }
 
-  if(p && p.c===turn){
+  if(p&&p.c===turn){
     selected={x,y};
     moves=getLegalMoves(x,y);
   }else{
     selected=null;
     moves=[];
   }
+
   draw();
 }
 
 function move(x1,y1,x2,y2){
   const p=board[y1][x1];
+  const target=board[y2][x2];
+
+  if(target){
+    const base=target.t.replace("+","");
+    hands[turn][base]=(hands[turn][base]||0)+1;
+  }
+
   board[y2][x2]=p;
   board[y1][x1]=null;
 
-  // 成り
-  if((p.c==="b"&&y2<=2)||(p.c==="w"&&y2>=6)){
-    if(["P","L","N","S","B","R"].includes(p.t)&&!p.t.startsWith("+")){
+  if(forcePromote(p,y2)){
+    p.t="+"+p.t;
+  }else if(canPromote(p,y1,y2)){
+    if(confirm("成りますか？"))
       p.t="+"+p.t;
-      setTimeout(()=>draw(),10);
-    }
   }
 }
 
-function getMovesRaw(b,x,y){
-  const p=b[y][x];
-  const dir=p.c==="b"?-1:1;
-  const list=[];
-  const add=(dx,dy,repeat=false)=>{
-    let nx=x+dx,ny=y+dy;
-    while(nx>=0&&nx<9&&ny>=0&&ny<9){
-      if(b[ny][nx]){
-        if(b[ny][nx].c!==p.c)
-          list.push({x:nx,y:ny});
-        break;
-      }
-      list.push({x:nx,y:ny});
-      if(!repeat)break;
-      nx+=dx;ny+=dy;
-    }
-  };
+function forcePromote(p,y){
+  if(p.t==="P"||p.t==="L")
+    return (p.c==="b"&&y===0)||(p.c==="w"&&y===8);
+  if(p.t==="N")
+    return (p.c==="b"&&y<=1)||(p.c==="w"&&y>=7);
+  return false;
+}
 
-  if(p.t==="P") add(0,dir);
-  if(p.t==="R") {add(1,0,true);add(-1,0,true);add(0,1,true);add(0,-1,true);}
-  if(p.t==="B") {add(1,1,true);add(-1,1,true);add(1,-1,true);add(-1,-1,true);}
-  if(p.t==="K"){
-    for(let dx=-1;dx<=1;dx++)
-      for(let dy=-1;dy<=1;dy++)
-        if(dx||dy)add(dx,dy);
+function canPromote(p,y1,y2){
+  if(p.t.startsWith("+")) return false;
+  if(!["P","L","N","S","B","R"].includes(p.t)) return false;
+  const zone=p.c==="b" ? [0,1,2] : [6,7,8];
+  return zone.includes(y1)||zone.includes(y2);
+}
+
+function isLegalDrop(t,x,y){
+  if(t==="P"){
+    for(let i=0;i<9;i++)
+      if(board[i][x]&&board[i][x].c===turn&&board[i][x].t==="P")
+        return false;
+    if((turn==="b"&&y===0)||(turn==="w"&&y===8))
+      return false;
   }
-  if(p.t==="G"||p.t==="+P")
-    {add(0,dir);add(-1,dir);add(1,dir);add(-1,0);add(1,0);add(0,-dir);}
-
-  return list;
+  if(t==="N"){
+    if((turn==="b"&&y<=1)||(turn==="w"&&y>=7))
+      return false;
+  }
+  if(t==="L"){
+    if((turn==="b"&&y===0)||(turn==="w"&&y===8))
+      return false;
+  }
+  return true;
 }
 
-function getLegalMoves(x,y){
-  const raw=getMovesRaw(board,x,y);
-  return raw.filter(m=>{
-    const test=clone(board);
-    test[m.y][m.x]=test[y][x];
-    test[y][x]=null;
-    return !isCheck(test,turn);
-  });
-}
+/* ====== 王手・詰み判定 ====== */
 
 function isCheck(b,color){
   let king;
@@ -266,11 +327,37 @@ function isCheck(b,color){
 
 function isMate(color){
   if(!isCheck(board,color)) return false;
+
   for(let y=0;y<9;y++)
     for(let x=0;x<9;x++)
-      if(board[y][x]&&board[y][x].c===color)
-        if(getLegalMoves(x,y).length>0)
-          return false;
+      if(board[y][x]&&board[y][x].c===color){
+        const raw=getMovesRaw(board,x,y);
+        for(let m of raw){
+          const test=clone(board);
+          test[m.y][m.x]=test[y][x];
+          test[y][x]=null;
+          if(!isCheck(test,color)) return false;
+        }
+      }
+
+  return true;
+}
+
+function isMateAfterDrop(testBoard,color){
+  const opponent=color==="b"?"w":"b";
+  if(!isCheck(testBoard,opponent)) return false;
+
+  for(let y=0;y<9;y++)
+    for(let x=0;x<9;x++)
+      if(testBoard[y][x]&&testBoard[y][x].c===opponent){
+        const raw=getMovesRaw(testBoard,x,y);
+        for(let m of raw){
+          const copy=clone(testBoard);
+          copy[m.y][m.x]=copy[y][x];
+          copy[y][x]=null;
+          if(!isCheck(copy,opponent)) return false;
+        }
+      }
   return true;
 }
 
@@ -281,11 +368,93 @@ function updateStatus(){
   statusEl.textContent=txt;
 }
 
+/* ====== 駒の動き ====== */
+
+function getLegalMoves(x,y){
+  const p=board[y][x];
+  const raw=getMovesRaw(board,x,y);
+  return raw.filter(m=>{
+    const test=clone(board);
+    test[m.y][m.x]=test[y][x];
+    test[y][x]=null;
+    return !isCheck(test,p.c);
+  });
+}
+
+function getMovesRaw(b,x,y){
+  const p=b[y][x];
+  const dir=p.c==="b"?-1:1;
+  const list=[];
+  const add=(dx,dy,repeat=false)=>{
+    let nx=x+dx,ny=y+dy;
+    while(nx>=0&&nx<9&&ny>=0&&ny<9){
+      if(b[ny][nx]){
+        if(b[ny][nx].c!==p.c) list.push({x:nx,y:ny});
+        break;
+      }
+      list.push({x:nx,y:ny});
+      if(!repeat) break;
+      nx+=dx;ny+=dy;
+    }
+  };
+
+  switch(p.t){
+    case "P": add(0,dir); break;
+    case "L": add(0,dir,true); break;
+    case "N": add(-1,dir*2); add(1,dir*2); break;
+    case "S":
+      add(0,dir);add(-1,dir);add(1,dir);
+      add(-1,-dir);add(1,-dir);
+      break;
+    case "G":
+    case "+P": case "+L": case "+N": case "+S":
+      add(0,dir);add(-1,dir);add(1,dir);
+      add(-1,0);add(1,0);add(0,-dir);
+      break;
+    case "K":
+      for(let dx=-1;dx<=1;dx++)
+        for(let dy=-1;dy<=1;dy++)
+          if(dx||dy) add(dx,dy);
+      break;
+    case "R":
+      add(1,0,true);add(-1,0,true);
+      add(0,1,true);add(0,-1,true);
+      break;
+    case "+R":
+      add(1,0,true);add(-1,0,true);
+      add(0,1,true);add(0,-1,true);
+      add(1,1);add(-1,1);add(1,-1);add(-1,-1);
+      break;
+    case "B":
+      add(1,1,true);add(-1,1,true);
+      add(1,-1,true);add(-1,-1,true);
+      break;
+    case "+B":
+      add(1,1,true);add(-1,1,true);
+      add(1,-1,true);add(-1,-1,true);
+      add(1,0);add(-1,0);add(0,1);add(0,-1);
+      break;
+  }
+  return list;
+}
+
 init();
 draw();
+/* ====== キーボード操作 ====== */
 
 
-document.addEventListener("keydown", e=>{
+let handMode=false;
+let handList=[];
+let handIndex=0;
+
+
+function updateHandList(){
+  handList=Object.keys(hands[turn]);
+  if(handIndex>=handList.length) handIndex=0;
+}
+
+document.addEventListener("keydown",e=>{
+
   if(e.key==="ArrowUp") cursor.y=Math.max(0,cursor.y-1);
   if(e.key==="ArrowDown") cursor.y=Math.min(8,cursor.y+1);
   if(e.key==="ArrowLeft") cursor.x=Math.max(0,cursor.x-1);
@@ -294,14 +463,40 @@ document.addEventListener("keydown", e=>{
   if(e.key==="Escape"){
     selected=null;
     moves=[];
+    dropPiece=null;
+    handMode=false;
   }
 
-  if(e.key==="Enter"){
-    click(cursor.x,cursor.y);
+  if(e.key==="r"||e.key==="R"){
+    init();
+    turn="b";
+  }
+
+  // 持ち駒モード
+  if(e.key==="d"||e.key==="D"){
+    handMode=!handMode;
+    updateHandList();
+  }
+
+  // 持ち駒選択
+  if(handMode && handList.length>0){
+    if(e.key==="ArrowLeft") handIndex=(handIndex-1+handList.length)%handList.length;
+    if(e.key==="ArrowRight") handIndex=(handIndex+1)%handList.length;
+    if(e.key==="Enter"||e.key===" "){
+      dropPiece={t:handList[handIndex]};
+      handMode=false;
+    }
+  }else{
+    if(e.key==="Enter"||e.key===" "){
+      click(cursor.x,cursor.y);
+    }
   }
 
   draw();
+  drawCursor();
 });
+
+
 </script>
 </body>
 </html>
